@@ -7,24 +7,24 @@ const buildPrompt = (designContext: string): string => `You are Crit, an expert 
 
 ${designContext ? `Designer's context: ${designContext}\n` : ''}
 
-Return ONLY valid JSON in this exact shape:
+Return ONLY valid JSON in this exact shape, no markdown, no backticks, no extra text whatsoever:
 {
-  "overall_score": <0-100>,
-  "summary": "<one sentence, max 120 chars>",
+  "overall_score": 72,
+  "summary": "example summary here",
   "dimensions": {
-    "clarity": <0-100>,
-    "hierarchy": <0-100>,
-    "trust": <0-100>,
-    "conversion": <0-100>
+    "clarity": 80,
+    "hierarchy": 70,
+    "trust": 60,
+    "conversion": 75
   },
   "issues": [
     {
-      "severity": "critical|warning|minor",
-      "title": "<max 60 chars>",
-      "area": "<Trust|Hierarchy|Clarity|Conversion>",
-      "description": "<2 sentences, specific to what you see>",
-      "fix": "<one concrete fix, 1-2 sentences>",
-      "impact": "<e.g. '+15% conversion' or 'reduces bounce'>"
+      "severity": "critical",
+      "title": "example issue title",
+      "area": "Trust",
+      "description": "Two sentences describing what you see.",
+      "fix": "One concrete fix.",
+      "impact": "+15% conversion"
     }
   ]
 }
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const geminiResponse = await fetch(url, {
       method: 'POST',
@@ -79,7 +79,6 @@ export async function POST(request: NextRequest) {
         generationConfig: {
           temperature: 0.4,
           maxOutputTokens: 2000,
-          responseMimeType: 'application/json',
         },
       }),
     });
@@ -95,9 +94,17 @@ export async function POST(request: NextRequest) {
 
     const geminiData = await geminiResponse.json();
     const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    const parsed = JSON.parse(rawText);
 
+    // Strip any markdown the model adds despite instructions
+    const cleaned = rawText
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
+
+    const parsed = JSON.parse(cleaned);
     return Response.json(parsed);
+
   } catch (err: any) {
     console.error('[critique] error:', err);
     return Response.json(
