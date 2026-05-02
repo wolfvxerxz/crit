@@ -3,14 +3,16 @@ import { NextRequest } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const buildPrompt = (designContext: string): string => `You are Crit, an expert design critic. Analyse the design image and return a JSON critique. Be specific and reference what you actually see.
+const buildPrompt = (designContext: string): string => `You are Crit, an expert design critic. Analyse the design image and return a JSON critique. Be specific.
 
 ${designContext ? `Designer's context: ${designContext}\n` : ''}
 
-Return ONLY valid JSON, no markdown, no backticks, no extra text:
+Return ONLY valid JSON, no markdown, no backticks, no extra text. Keep all string values short and concise.
+
+Schema:
 {
   "overall_score": 72,
-  "summary": "example summary here",
+  "summary": "one sentence verdict, max 100 chars",
   "dimensions": {
     "clarity": 80,
     "hierarchy": 70,
@@ -20,16 +22,20 @@ Return ONLY valid JSON, no markdown, no backticks, no extra text:
   "issues": [
     {
       "severity": "critical",
-      "title": "example issue title",
+      "title": "short issue title, max 50 chars",
       "area": "Trust",
-      "description": "Two sentences describing what you see.",
-      "fix": "One concrete fix.",
-      "impact": "+15% conversion"
+      "description": "two short sentences max",
+      "fix": "one short sentence",
+      "impact": "short phrase like +15% conversion"
     }
   ]
 }
 
-Score honestly: 50-75 is typical. Below 40 = serious problems. Above 85 = rare. Give 3-5 issues by severity.`;
+Rules:
+- Score honestly: 50-75 typical, below 40 serious, above 85 rare
+- Output 3 issues maximum, prioritised by severity
+- Keep each string value brief and direct
+- Do not include any text outside the JSON object`;
 
 export async function POST(request: NextRequest) {
   const apiKey = process.env.GOOGLE_AI_API_KEY;
@@ -78,7 +84,7 @@ export async function POST(request: NextRequest) {
         ],
         generationConfig: {
           temperature: 0.4,
-          maxOutputTokens: 2000,
+          maxOutputTokens: 4000,
         },
       }),
     });
@@ -101,7 +107,18 @@ export async function POST(request: NextRequest) {
       .replace(/```\s*$/i, '')
       .trim();
 
-    const parsed = JSON.parse(cleaned);
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (parseErr) {
+      // If the model truncated, try to recover by closing the JSON
+      console.error('Parse failed, raw text:', cleaned);
+      return Response.json(
+        { error: 'Model output was incomplete. Try again.' },
+        { status: 502 }
+      );
+    }
+
     return Response.json(parsed);
 
   } catch (err: any) {
