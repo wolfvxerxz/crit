@@ -3,14 +3,14 @@ import { NextRequest } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const buildPrompt = (designContext: string): string => `You are Crit, an expert design critic. Analyse the design image provided and return a JSON critique. Be specific, blunt, and useful — no fluff. Reference what you actually see in the image.
+const buildPrompt = (designContext: string): string => `You are Crit, an expert design critic. Analyse the design image and return a JSON critique. Be specific and reference what you actually see.
 
 ${designContext ? `Designer's context: ${designContext}\n` : ''}
 
-Return ONLY valid JSON in this exact shape (no markdown, no commentary):
+Return ONLY valid JSON in this exact shape:
 {
-  "overall_score": <0-100 integer>,
-  "summary": "<one-sentence verdict, max 120 chars>",
+  "overall_score": <0-100>,
+  "summary": "<one sentence, max 120 chars>",
   "dimensions": {
     "clarity": <0-100>,
     "hierarchy": <0-100>,
@@ -20,16 +20,16 @@ Return ONLY valid JSON in this exact shape (no markdown, no commentary):
   "issues": [
     {
       "severity": "critical|warning|minor",
-      "title": "<short issue title, max 60 chars>",
-      "area": "<UX area like Trust, Hierarchy, Clarity, Conversion>",
-      "description": "<2 sentences max, specific to what you see>",
-      "fix": "<one concrete actionable fix, 1-2 sentences>",
-      "impact": "<estimated impact like '+15% conversion' or 'A/B testable'>"
+      "title": "<max 60 chars>",
+      "area": "<Trust|Hierarchy|Clarity|Conversion>",
+      "description": "<2 sentences, specific to what you see>",
+      "fix": "<one concrete fix, 1-2 sentences>",
+      "impact": "<e.g. '+15% conversion' or 'reduces bounce'>"
     }
   ]
 }
 
-Score honestly. Most designs sit between 50-75. Below 40 means serious problems. Above 85 is rare. Output 3-5 issues, prioritised by severity.`;
+Score honestly: 50-75 is typical. Below 40 = serious problems. Above 85 = rare. Give 3-5 issues by severity.`;
 
 export async function POST(request: NextRequest) {
   const apiKey = process.env.GOOGLE_AI_API_KEY;
@@ -54,83 +54,55 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: 'Missing image data' }, { status: 400 });
   }
 
-  if (!imageMime.startsWith('image/')) {
-    return Response.json({ error: 'File must be an image' }, { status: 400 });
-  }
+  try {
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream({
-    async start(controller) {
-      try {
-        // Call Gemini 1.5 Flash — free tier, supports vision
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
-
-        const geminiResponse = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [
+    const geminiResponse = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
               {
-                parts: [
-                  {
-                    inline_data: {
-                      mime_type: imageMime,
-                      data: imageData,
-                    },
-                  },
-                  {
-                    text: buildPrompt(designContext || ''),
-                  },
-                ],
+                inline_data: {
+                  mime_type: imageMime,
+                  data: imageData,
+                },
+              },
+              {
+                text: buildPrompt(designContext || ''),
               },
             ],
-            generationConfig: {
-              temperature: 0.4,
-              maxOutputTokens: 2000,
-            },
-          }),
-        });
+          },
+        ],
+        generationConfig: {
+          temperature: 0.4,
+          maxOutputTokens: 2000,
+          response_mime_type: 'application/json',
+        },
+      }),
+    });
 
-        if (!geminiResponse.ok) {
-          const errText = await geminiResponse.text();
-          throw new Error(`Gemini API error ${geminiResponse.status}: ${errText}`);
-        }
+    if (!geminiResponse.ok) {
+      const errText = await geminiResponse.text();
+      console.error('Gemini error:', errText);
+      return Response.json(
+        { error: `Gemini API error ${geminiResponse.status}: ${errText}` },
+        { status: 502 }
+      );
+    }
 
-        const geminiData = await geminiResponse.json();
+    const geminiData = await geminiResponse.json();
+    const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const parsed = JSON.parse(rawText);
 
-        const rawText =
-          geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-        const cleaned = rawText
-          .replace(/^```json\s*/i, '')
-          .replace(/```\s*$/, '')
-          .trim();
-
-        const parsed = JSON.parse(cleaned);
-
-        controller.enqueue(
-          encoder.encode('\n\n__RESULT__' + JSON.stringify(parsed))
-        );
-        controller.close();
-      } catch (err: any) {
-        console.error('[critique] error:', err);
-        controller.enqueue(
-          encoder.encode(
-            '\n\n__ERROR__' +
-              JSON.stringify({ error: err?.message || 'Failed to generate critique' })
-          )
-        );
-        controller.close();
-      }
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Transfer-Encoding': 'chunked',
-      'X-Accel-Buffering': 'no',
-    },
-  });
+    return Response.json(parsed);
+  } catch (err: any) {
+    console.error('[critique] error:', err);
+    return Response.json(
+      { error: err?.message || 'Failed to generate critique' },
+      { status: 500 }
+    );
+  }
 }
