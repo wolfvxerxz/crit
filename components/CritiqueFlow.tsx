@@ -6,14 +6,14 @@ import { addToHistory, type Critique } from '@/lib/storage';
 import LoadingBars from './LoadingBars';
 import CritiqueResult from './CritiqueResult';
 
-interface Props {
+interface CritiqueFlowProps {
   onComplete: (critique: Critique) => void;
   onCancel: () => void;
 }
 
 type Step = 'upload' | 'analyzing' | 'complete';
 
-export default function ({ onComplete, onCancel }: Props) {
+export default function CritiqueFlow({ onComplete, onCancel }: CritiqueFlowProps) {
   const [step, setStep] = useState<Step>('upload');
   const [imageData, setImageData] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
@@ -100,7 +100,28 @@ export default function ({ onComplete, onCancel }: Props) {
         throw new Error(errBody.error || 'Failed to generate critique');
       }
 
-      const parsed = await response.json();
+      // Read the streamed response until we find __RESULT__ or __ERROR__
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let accumulated = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+
+        if (accumulated.includes('__RESULT__')) break;
+        if (accumulated.includes('__ERROR__')) break;
+      }
+
+      if (accumulated.includes('__ERROR__')) {
+        const errJson = accumulated.split('__ERROR__')[1];
+        const err = JSON.parse(errJson.trim());
+        throw new Error(err.error || 'Failed to generate critique');
+      }
+
+      const resultJson = accumulated.split('__RESULT__')[1];
+      const parsed = JSON.parse(resultJson.trim());
 
       clearInterval(stageTimer);
       setProgress(100);
