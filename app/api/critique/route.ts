@@ -7,7 +7,7 @@ const buildPrompt = (designContext: string): string => `You are Crit, an expert 
 
 ${designContext ? `Designer's context: ${designContext}\n` : ''}
 
-Return ONLY valid JSON in this exact shape, no markdown, no backticks, no extra text whatsoever:
+Return ONLY valid JSON, no markdown, no backticks, no extra text:
 {
   "overall_score": 72,
   "summary": "example summary here",
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
     const geminiResponse = await fetch(url, {
       method: 'POST',
@@ -95,7 +95,6 @@ export async function POST(request: NextRequest) {
     const geminiData = await geminiResponse.json();
     const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // Strip any markdown the model adds despite instructions
     const cleaned = rawText
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
