@@ -7,7 +7,7 @@ const buildPrompt = (designContext: string): string => `You are Crit, an expert 
 
 ${designContext ? `Designer's context: ${designContext}\n` : ''}
 
-Return ONLY valid JSON, no markdown, no backticks, no extra text:
+Return ONLY valid JSON in this exact shape:
 {
   "overall_score": <0-100>,
   "summary": "<one sentence, max 120 chars>",
@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const geminiResponse = await fetch(url, {
       method: 'POST',
@@ -79,6 +79,7 @@ export async function POST(request: NextRequest) {
         generationConfig: {
           temperature: 0.4,
           maxOutputTokens: 2000,
+          responseMimeType: 'application/json',
         },
       }),
     });
@@ -94,14 +95,7 @@ export async function POST(request: NextRequest) {
 
     const geminiData = await geminiResponse.json();
     const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-    const cleaned = rawText
-      .replace(/^```json\s*/i, '')
-      .replace(/^```\s*/i, '')
-      .replace(/```\s*$/i, '')
-      .trim();
-
-    const parsed = JSON.parse(cleaned);
+    const parsed = JSON.parse(rawText);
 
     return Response.json(parsed);
   } catch (err: any) {
