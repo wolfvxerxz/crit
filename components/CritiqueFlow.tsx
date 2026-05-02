@@ -6,14 +6,14 @@ import { addToHistory, type Critique } from '@/lib/storage';
 import LoadingBars from './LoadingBars';
 import CritiqueResult from './CritiqueResult';
 
-interface CritiqueFlowProps {
+interface Props {
   onComplete: (critique: Critique) => void;
   onCancel: () => void;
 }
 
 type Step = 'upload' | 'analyzing' | 'complete';
 
-export default function CritiqueFlow({ onComplete, onCancel }: CritiqueFlowProps) {
+export default function ({ onComplete, onCancel }: Props) {
   const [step, setStep] = useState<Step>('upload');
   const [imageData, setImageData] = useState<string | null>(null);
   const [imageMime, setImageMime] = useState<string | null>(null);
