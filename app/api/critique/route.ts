@@ -3,39 +3,61 @@ import { NextRequest } from 'next/server';
 export const runtime = 'nodejs';
 export const maxDuration = 60;
 
-const buildPrompt = (designContext: string): string => `You are Crit, an expert design critic. Analyse the design image and return a JSON critique. Be specific.
+const buildPrompt = (designContext: string): string => `You are an expert UI designer providing thoughtful, specific feedback following the design principles from Refactoring UI by Adam Wathan and Steve Schoger. Analyse the screenshot and return a structured JSON critique.
 
 ${designContext ? `Designer's context: ${designContext}\n` : ''}
 
-Return ONLY valid JSON, no markdown, no backticks, no extra text. Keep all string values short and concise.
+ANALYSIS FRAMEWORK — evaluate the design across these 6 dimensions:
 
-Schema:
+1. HIERARCHY & VISUAL WEIGHT — Does the design communicate importance through size, color, and contrast? Are primary actions clearly emphasized? Is secondary information appropriately de-emphasized?
+
+2. LAYOUT & SPACING — Is there enough white space? Are there spacing inconsistencies? Do related elements have appropriate proximity? Are there areas too crowded or too empty?
+
+3. TYPOGRAPHY — Is text hierarchy clear? Are font sizes appropriate and consistent? Is line height and letter spacing optimized? Could font weights be used more effectively?
+
+4. COLOR USAGE — Are colors used consistently and purposefully? Is there appropriate contrast? Are accent colors drawing attention to the right elements? Could colors create better hierarchy?
+
+5. DEPTH & VISUAL INTEREST — Could shadows or layering improve it? Are backgrounds utilised well? Are borders overused where spacing or background changes would work better?
+
+6. EMPTY STATES & EDGE CASES — How could empty states be improved? Are there edge cases not accounted for?
+
+SCORING — Map the 4 dimension scores like this:
+- "clarity" = score for Typography + Hierarchy combined (is the design readable and well-organised?)
+- "hierarchy" = score for Visual Weight (does the eye know where to go?)
+- "trust" = score for Color Usage + Depth (does it feel polished and credible?)
+- "conversion" = score for Layout & Spacing + Empty States (is it efficient and complete?)
+
+Score each dimension 0-100 INDEPENDENTLY based on what you actually see. Vary the scores realistically — most real designs score wildly differently across dimensions (e.g. 85 typography, 45 hierarchy, 70 color, 30 spacing). Avoid clustering all four scores in the same range. Overall_score should be the weighted average, leaning toward the lowest dimensions.
+
+Return ONLY valid JSON, no markdown, no backticks:
 {
-  "overall_score": 72,
-  "summary": "one sentence verdict, max 100 chars",
+  "overall_score": <0-100 integer>,
+  "summary": "<one specific sentence verdict referencing the actual design, max 110 chars>",
   "dimensions": {
-    "clarity": 80,
-    "hierarchy": 70,
-    "trust": 60,
-    "conversion": 75
+    "clarity": <0-100>,
+    "hierarchy": <0-100>,
+    "trust": <0-100>,
+    "conversion": <0-100>
   },
   "issues": [
     {
-      "severity": "critical",
-      "title": "short issue title, max 50 chars",
-      "area": "Trust",
-      "description": "two short sentences max",
-      "fix": "one short sentence",
-      "impact": "short phrase like +15% conversion"
+      "severity": "critical|warning|minor",
+      "title": "<specific issue, max 60 chars>",
+      "area": "Hierarchy|Layout|Typography|Color|Depth|Empty States",
+      "description": "<2 sentences referencing exactly what you see in the screenshot — the specific button, heading, section, color, etc>",
+      "fix": "<one concrete actionable suggestion based on Refactoring UI principles. NO pixel values or code. Focus on visual design principles>",
+      "impact": "<brief outcome like 'sharper focal point', 'easier scanning', 'feels more credible'>"
     }
   ]
 }
 
-Rules:
-- Score honestly: 50-75 typical, below 40 serious, above 85 rare
-- Output 3 issues maximum, prioritised by severity
-- Keep each string value brief and direct
-- Do not include any text outside the JSON object`;
+CRITICAL RULES:
+- Output 3-5 issues, prioritised by impact
+- Each issue must reference SPECIFIC elements you see (not "the buttons" but "the orange Sign Up button next to the email field")
+- NO generic advice ("improve hierarchy") — only specific, actionable suggestions ("the secondary 'Learn More' link competes with the primary CTA — try making it a plain text link without the box")
+- Reference Refactoring UI principles where relevant (de-emphasize secondary info, use color sparingly, establish a spacing/size system, depth through subtle shadows not borders, etc.)
+- Vary your scores meaningfully — same scores every time means lazy analysis
+- Be honest and direct, not encouraging`;
 
 export async function POST(request: NextRequest) {
   const apiKey = process.env.GOOGLE_AI_API_KEY;
@@ -83,7 +105,8 @@ export async function POST(request: NextRequest) {
           },
         ],
         generationConfig: {
-          temperature: 0.4,
+          temperature: 0.85,
+          topP: 0.95,
           maxOutputTokens: 4000,
         },
       }),
@@ -99,18 +122,15 @@ export async function POST(request: NextRequest) {
     }
 
     const geminiData = await geminiResponse.json();
-
-    // Defensive extraction — Gemini sometimes returns weird shapes
     const candidate = geminiData?.candidates?.[0];
     const finishReason = candidate?.finishReason;
     const rawText = candidate?.content?.parts?.[0]?.text;
 
     if (!rawText || typeof rawText !== 'string') {
       console.error('No text in response. Finish reason:', finishReason);
-      console.error('Full response:', JSON.stringify(geminiData));
       return Response.json(
         {
-          error: `Model returned no text (reason: ${finishReason || 'unknown'}). Try a different image or add more context.`,
+          error: `Model returned no text (reason: ${finishReason || 'unknown'}). Try a different image.`,
         },
         { status: 502 }
       );
