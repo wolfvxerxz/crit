@@ -85,39 +85,62 @@ export async function POST(request: NextRequest) {
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
 
-    const geminiResponse = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                inline_data: {
-                  mime_type: imageMime,
-                  data: imageData,
-                },
+    const requestBody = JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              inline_data: {
+                mime_type: imageMime,
+                data: imageData,
               },
-              {
-                text: buildPrompt(designContext || ''),
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.85,
-          topP: 0.95,
-          maxOutputTokens: 4000,
+            },
+            {
+              text: buildPrompt(designContext || ''),
+            },
+          ],
         },
-      }),
+      ],
+      generationConfig: {
+        temperature: 0.85,
+        topP: 0.95,
+        maxOutputTokens: 4000,
+      },
     });
 
-    if (!geminiResponse.ok) {
-      const errText = await geminiResponse.text();
-      console.error('Gemini error:', errText);
+    // Retry on 503 (overloaded) or 429 (rate limit) with exponential backoff
+    let geminiResponse: Response | null = null;
+    let lastError = '';
+    const maxAttempts = 3;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      geminiResponse = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: requestBody,
+      });
+
+      if (geminiResponse.ok) break;
+
+      lastError = await geminiResponse.text();
+      console.error(`Attempt ${attempt} failed:`, geminiResponse.status, lastError);
+
+      if (geminiResponse.status !== 503 && geminiResponse.status !== 429) {
+        return Response.json(
+          { error: `Gemini API error ${geminiResponse.status}: ${lastError}` },
+          { status: 502 }
+        );
+      }
+
+      if (attempt < maxAttempts) {
+        await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
+      }
+    }
+
+    if (!geminiResponse || !geminiResponse.ok) {
       return Response.json(
-        { error: `Gemini API error ${geminiResponse.status}: ${errText}` },
-        { status: 502 }
+        { error: 'Gemini is overloaded right now. Try again in a minute.' },
+        { status: 503 }
       );
     }
 
