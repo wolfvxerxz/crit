@@ -100,28 +100,11 @@ export default function CritiqueFlow({ onComplete, onCancel }: CritiqueFlowProps
         throw new Error(errBody.error || 'Failed to generate critique');
       }
 
-      // Read the streamed response until we find __RESULT__ or __ERROR__
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let accumulated = '';
+      const parsed = await response.json();
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        accumulated += decoder.decode(value, { stream: true });
-
-        if (accumulated.includes('__RESULT__')) break;
-        if (accumulated.includes('__ERROR__')) break;
+      if (parsed.error) {
+        throw new Error(parsed.error);
       }
-
-      if (accumulated.includes('__ERROR__')) {
-        const errJson = accumulated.split('__ERROR__')[1];
-        const err = JSON.parse(errJson.trim());
-        throw new Error(err.error || 'Failed to generate critique');
-      }
-
-      const resultJson = accumulated.split('__RESULT__')[1];
-      const parsed = JSON.parse(resultJson.trim());
 
       clearInterval(stageTimer);
       setProgress(100);
