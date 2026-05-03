@@ -99,7 +99,22 @@ export async function POST(request: NextRequest) {
     }
 
     const geminiData = await geminiResponse.json();
-    const rawText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // Defensive extraction — Gemini sometimes returns weird shapes
+    const candidate = geminiData?.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+    const rawText = candidate?.content?.parts?.[0]?.text;
+
+    if (!rawText || typeof rawText !== 'string') {
+      console.error('No text in response. Finish reason:', finishReason);
+      console.error('Full response:', JSON.stringify(geminiData));
+      return Response.json(
+        {
+          error: `Model returned no text (reason: ${finishReason || 'unknown'}). Try a different image or add more context.`,
+        },
+        { status: 502 }
+      );
+    }
 
     const cleaned = rawText
       .replace(/^```json\s*/i, '')
@@ -111,8 +126,7 @@ export async function POST(request: NextRequest) {
     try {
       parsed = JSON.parse(cleaned);
     } catch (parseErr) {
-      // If the model truncated, try to recover by closing the JSON
-      console.error('Parse failed, raw text:', cleaned);
+      console.error('Parse failed. Raw text:', cleaned);
       return Response.json(
         { error: 'Model output was incomplete. Try again.' },
         { status: 502 }
